@@ -1,4 +1,4 @@
-hip_add_library(gpu_ans SHARED
+hip_add_library(gpu_ans ${HIPANS_LIBRARY_TYPE}
   GpuANSDecode.cpp
   GpuANSEncode.cpp
   GpuANSInfo.cpp
@@ -54,4 +54,3 @@ target_include_directories(compress PRIVATE
   $<BUILD_INTERFACE:${hipans_SOURCE_DIR}>
   "${TORCH_INCLUDE_DIRS}"
 )
-

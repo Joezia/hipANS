@@ -1,4 +1,4 @@
-hip_add_library(hipans_utils SHARED
+hip_add_library(hipans_utils ${HIPANS_LIBRARY_TYPE}
   DeviceUtils.cpp
   StackDeviceMemory.cpp
 )

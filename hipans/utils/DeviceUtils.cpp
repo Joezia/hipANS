@@ -106,8 +106,8 @@ int getDeviceForAddress(const void* p) {
     return -1;
   }
 
-  // memoryType is deprecated for high version
-  if (att.memoryType == hipMemoryTypeHost) {
+  // ROCm 6 removed the deprecated memoryType alias; type is the supported field.
+  if (att.type == hipMemoryTypeHost) {
     return -1;
   } else {
     return att.device;

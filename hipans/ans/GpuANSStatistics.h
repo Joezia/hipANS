@@ -129,6 +129,10 @@ __device__ void histogramSingle(
   }
 }
 
+struct __align__(32) ANSUInt32x8 {
+  uint32_t values[8];
+};
+
 template <int Threads>
 __device__ void histogramSingle_UINT8(
     const ANSDecodedT* __restrict__ in,
@@ -154,16 +158,16 @@ __device__ void histogramSingle_UINT8(
 
   // If the size of batch is smaller than the increment for alignment, we only
   // handle the batch
-  auto roundUp8 = min(size, getAlignmentRoundUp<sizeof(uint8)>(in));
+  auto roundUp8 = min(size, getAlignmentRoundUp<sizeof(ANSUInt32x8)>(in));
 
   // The size of data that remains after alignment
   auto remaining = size - roundUp8;
 
   // The size of data (in uint4 words) that we can process with alignment
-  uint32_t numU8 = divDown(remaining, sizeof(uint8));
+  uint32_t numU8 = divDown(remaining, sizeof(ANSUInt32x8));
 
   auto inAligned = in + roundUp8;
-  auto inAligned8 = (const uint8*)inAligned;
+  auto inAligned8 = (const ANSUInt32x8*)inAligned;
 
   // Handle the non-aligned portion that we have to load as single words, if any
   if (blockIdx.x == 0 && threadIdx.x < roundUp8) {
@@ -175,10 +179,10 @@ __device__ void histogramSingle_UINT8(
   // 37.60 us / 80.76% gmem / 51.29% smem for uint4 on A100
   for (uint32_t i = blockIdx.x * Threads + threadIdx.x; i < numU8;
        i += gridDim.x * Threads) {
-    uint8 v = inAligned8[i];
+    ANSUInt32x8 v = inAligned8[i];
 
     {
-      uint32_t x = v[0];
+      uint32_t x = v.values[0];
       atomicAdd(&warpBucket[x & 0xff], 1);
       x >>= 8;
       atomicAdd(&warpBucket[x & 0xff], 1);
@@ -189,7 +193,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t y = v[1];
+      uint32_t y = v.values[1];
       atomicAdd(&warpBucket[y & 0xff], 1);
       y >>= 8;
       atomicAdd(&warpBucket[y & 0xff], 1);
@@ -200,7 +204,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t z = v[2];
+      uint32_t z = v.values[2];
       atomicAdd(&warpBucket[z & 0xff], 1);
       z >>= 8;
       atomicAdd(&warpBucket[z & 0xff], 1);
@@ -211,7 +215,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t w = v[3];
+      uint32_t w = v.values[3];
       atomicAdd(&warpBucket[w & 0xff], 1);
       w >>= 8;
       atomicAdd(&warpBucket[w & 0xff], 1);
@@ -222,7 +226,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t a = v[4];
+      uint32_t a = v.values[4];
       atomicAdd(&warpBucket[a & 0xff], 1);
       a >>= 8;
       atomicAdd(&warpBucket[a & 0xff], 1);
@@ -233,7 +237,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t b = v[5];
+      uint32_t b = v.values[5];
       atomicAdd(&warpBucket[b & 0xff], 1);
       b >>= 8;
       atomicAdd(&warpBucket[b & 0xff], 1);
@@ -244,7 +248,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t c = v[6];
+      uint32_t c = v.values[6];
       atomicAdd(&warpBucket[c & 0xff], 1);
       c >>= 8;
       atomicAdd(&warpBucket[c & 0xff], 1);
@@ -255,7 +259,7 @@ __device__ void histogramSingle_UINT8(
     }
 
     {
-      uint32_t d = v[7];
+      uint32_t d = v.values[7];
       atomicAdd(&warpBucket[d & 0xff], 1);
       d >>= 8;
       atomicAdd(&warpBucket[d & 0xff], 1);
@@ -268,7 +272,7 @@ __device__ void histogramSingle_UINT8(
 
   if (blockIdx.x == 0) {
     // Handle the remainder portion that doesn't comprise full words
-    int i = numU8 * sizeof(uint8) + threadIdx.x;
+    int i = numU8 * sizeof(ANSUInt32x8) + threadIdx.x;
     if (i < remaining) {
       atomicAdd(&warpBucket[inAligned[i]], 1);
     }
