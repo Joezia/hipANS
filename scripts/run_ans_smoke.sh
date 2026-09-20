@@ -7,7 +7,7 @@ set -euo pipefail
 #   GPU_PARTITION  HACC GPU partition name (default: mi210_u280_u55c)
 #   BUILD_DIR      Existing build directory (default: <repo>/build)
 #   TEST_FILTER    GoogleTest filter (default: ANSTest.ZeroSized)
-#   LOG_DIR        Directory for the Slurm output (default: <repo>/logs)
+#   LOG_DIR        Directory for terminal output copies (default: <repo>/logs)
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-${repo_dir}/build}"
@@ -24,11 +24,33 @@ fi
 
 mkdir -p "${log_dir}"
 
-exec srun \
-  --job-name=hipans-ans-smoke \
-  -p "${gpu_partition}" \
-  --cpus-per-task=1 \
-  --time=00:05:00 \
-  --output="${log_dir}/ans-smoke-%j.out" \
-  --error="${log_dir}/ans-smoke-%j.err" \
-  "${test_bin}" "--gtest_filter=${test_filter}"
+if [[ "${1:-}" != "--inside-allocation" ]]; then
+  exec srun \
+    --job-name=hipans-ans-smoke \
+    -p "${gpu_partition}" \
+    --cpus-per-task=1 \
+    --time=00:05:00 \
+    "${BASH_SOURCE[0]}" --inside-allocation
+fi
+
+if [[ -z "${SLURM_JOB_ID:-}" && -z "${SLURM_JOB_NAME:-}" ]]; then
+  echo "Refusing to run the GPU test outside a Slurm allocation." >&2
+  exit 2
+fi
+
+node_name="$(hostname)"
+if [[ "${node_name}" == "hacchead"* ]]; then
+  echo "Refusing to run the GPU test on the hacchead login node." >&2
+  exit 2
+fi
+
+stdout_log="${log_dir}/ans-smoke-${SLURM_JOB_ID}.out"
+stderr_log="${log_dir}/ans-smoke-${SLURM_JOB_ID}.err"
+
+echo "Running ${test_filter} on ${node_name} in Slurm job ${SLURM_JOB_ID}."
+echo "stdout log: ${stdout_log}"
+echo "stderr log: ${stderr_log}"
+
+"${test_bin}" "--gtest_filter=${test_filter}" \
+  > >(tee "${stdout_log}") \
+  2> >(tee "${stderr_log}" >&2)
