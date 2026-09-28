@@ -1,5 +1,6 @@
 #pragma once
 
+#include <glog/logging.h>
 #include <hip/hip_runtime.h>
 #include <hipans/utils/DeviceUtils.h>
 #include <hipans/utils/StaticUtils.h>
