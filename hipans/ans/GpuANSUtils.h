@@ -27,8 +27,10 @@ constexpr uint32_t kNumSymbols = 1 << (sizeof(ANSDecodedT) * 8);
 static_assert(kNumSymbols > 1, "");
 
 // Default block size for compression (in bytes)
-constexpr uint32_t kDefaultBlockSize = 8192;
-//4096、5056;
+#ifndef HIPANS_BLOCK_SIZE
+#define HIPANS_BLOCK_SIZE 8192
+#endif
+constexpr uint32_t kDefaultBlockSize = HIPANS_BLOCK_SIZE;
 
 // limit state to 2^31 - 1, so as to prevent addition overflow in the integer
 // division via mul and shift by constants

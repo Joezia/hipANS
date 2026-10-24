@@ -270,6 +270,6 @@ TEST(ANSTest, BatchStride) {
   auto res = makeStackMemory();
 
   // FIXME: 16 byte alignment required
-  runBatchStride(res, 10, 13, 8192 + 16);
+  runBatchStride(res, 10, 13, kDefaultBlockSize + 16);
 }
 
