@@ -2,15 +2,19 @@
 # Collect AMD profiler data for the six points: rocprof-compute counters and
 # rocprofv3 host_trap PC samples. Run on an otherwise idle GPU.
 #
-#   scripts/reproduce/profile.sh <weights.bin> <throughput-output-dir> <output-dir>
+#   srun -p <gpu-partition> --gres=gpu:1 -N1 -n1 -t 00:30:00 bash scripts/reproduce/profile.sh <weights.bin> <throughput-output-dir> <output-dir>
 #
 # <throughput-output-dir> is the output of run_throughput.sh (its archives/ are reused).
 # env: BIN_DIR (default <repo>/build/reproduce/bin)
 #      ROCPROF_COMPUTE          rocprof-compute executable (default: rocprof-compute)
 #      ROCPROF_COMPUTE_PYTHON   optional Python used to start it (needed if it lives in a venv)
-# Then: python3 scripts/reproduce/analyze_cycles.py --profile-dir <output-dir> --bin-dir $BIN_DIR \
+# Then: srun -p <cpu-partition> -N1 -n1 -t 00:10:00 python3 scripts/reproduce/analyze_cycles.py --profile-dir <output-dir> --bin-dir $BIN_DIR \
 #         --throughput-json <throughput-output-dir>/summary.json --output cycles.json
 set -uo pipefail
+if [[ -z "${SLURM_JOB_ID:-}" || "$(hostname -s)" == login* || "$(hostname -s)" == hacchead* ]]; then
+  echo "ERROR: submit profiling with srun on a GPU compute node." >&2
+  exit 2
+fi
 src="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 weights="${1:?usage: profile.sh <weights.bin> <throughput-output-dir> <output-dir>}"
 archives="${2:?usage: profile.sh <weights.bin> <throughput-output-dir> <output-dir>}/archives"

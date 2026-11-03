@@ -9,7 +9,7 @@ This README has two distinct parts:
 
 ## Part I: MI350X optimizations and reproduction tutorial
 
-This fork includes three switchable optimizations and a standalone reproduction workflow:
+This fork includes three switchable optimizations and a Slurm-cluster reproduction workflow:
 
 | Point | Per-symbol workgroup barrier | Compressed input | Decode block |
 |---|---|---|---|
@@ -27,7 +27,7 @@ weights are downloaded separately by the supplied script.
 ### Environment
 
 The reference results use **one AMD Instinct MI350X, gfx950, wave64, 256 CUs**
-on Linux. The latest local reproduction used CMake 3.28.3 and ROCm's Clang
+on a Linux Slurm cluster. The latest reproduction used CMake 3.28.3 and ROCm's Clang
 23.0.0, as recorded by its CMake compiler configuration. Load a ROCm toolchain
 supporting gfx950, with `hipcc` and `cmake` on `PATH`; data download requires
 Python 3.9+ and `requests`. Throughput measurement does not require a profiler.
@@ -36,10 +36,10 @@ PC sampling, and ROCm LLVM tools. Other GPUs/toolchains can give different resul
 
 ### Tutorial: from clone to results
 
-Follow steps 1-6 below on a Linux workstation or server where you are allowed
-to compile and run GPU workloads. For a Slurm cluster, use the alternative
-job commands in the following subsection for steps 3-5; do not run those
-steps directly on its login node.
+Submit the following commands from the repository directory on the login node.
+Compilation and input download run in CPU jobs; measurement runs in a single-GPU
+job. The scripts reject execution outside a Slurm allocation or on a login node.
+Complete each step successfully before proceeding to the next.
 
 #### Step 1: Clone this fork
 
@@ -54,24 +54,32 @@ printed above with your results so that the experiment can be reproduced.
 
 #### Step 2: Prepare the environment
 
-Load your site's ROCm environment supporting MI350X. Check the compiler and
-build tools in the environment that will perform the build:
+Load your site's ROCm/Python environment supporting MI350X so it is available
+in submitted jobs. Check the compiler, build tools and Python dependencies on
+a CPU compute node:
 
 ```bash
-hipcc --version
-cmake --version
-python3 --version
-python3 -c 'import requests; print(requests.__version__)'
+srun -p devel -N1 -n1 -c2 -t 00:05:00 bash -c '
+  set -e
+  hipcc --version
+  cmake --version
+  python3 --version
+  python3 -c "import requests; print(requests.__version__)"
+'
 ```
 
-If `requests` is missing, install it in your Python environment (for example,
-`python3 -m pip install requests`). On a cluster, follow local environment and
-package-installation policies. This benchmark does not require PyTorch or sudo.
+If `requests` is missing, prepare an environment containing it according to
+your cluster's package-installation policies. This benchmark does not require
+PyTorch or sudo. `devel` and `mi3501x` below are example partition names from
+the measurement cluster: replace them and the GPU request flag with your site's
+approved equivalents. Use a shared filesystem visible to all jobs. CPU nodes
+need ROCm for compilation and network access for the data download.
 
 #### Step 3: Build all variants
 
 ```bash
-GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
+srun -p devel -N1 -n1 -c8 -t 00:20:00 \
+  env GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
 ```
 
 Wait for five `built ...` messages. Binaries are placed in
@@ -80,8 +88,8 @@ Wait for five `built ...` messages. Binaries are placed in
 #### Step 4: Download the test input
 
 ```bash
-python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
-sha256sum inputs/qwen38-expert0/weights.bin
+srun -p devel -N1 -n1 -c2 -t 00:10:00 \
+  python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
 ```
 
 The script downloads only a fixed 64 MiB BF16 expert slice, not the whole
@@ -93,12 +101,13 @@ f51d72cada2a1771261882f2f4dc56667c6059547ad385de57220657c72b6587
 
 #### Step 5: Run all six configurations
 
-Use one otherwise idle MI350X. `rocminfo` on the GPU compute node should
-identify the device and `gfx950`. On a standalone server with several GPUs,
-select your assigned device using the site's ROCm visibility settings.
+Request one MI350X; Slurm chooses a node and constrains GPU visibility according
+to the site's configuration. The resulting timing JSON should identify MI350X
+and `gfx950` under `provenance`. No interactive allocation is needed.
 
 ```bash
-bash scripts/reproduce/run_throughput.sh \
+srun -p mi3501x --gres=gpu:1 -N1 -n1 -c2 -t 00:30:00 \
+  bash scripts/reproduce/run_throughput.sh \
   inputs/qwen38-expert0/weights.bin out/throughput
 ```
 
@@ -106,28 +115,9 @@ This creates native archives for the four block sizes, verifies each of the
 six points byte for byte, runs three measurement processes per point and
 prints the comparison table. Proceed to the next step only if it exits successfully.
 
-#### Slurm alternative for steps 3-5
-
-After cloning and preparing the environment, submit these commands in order
-from the repository directory on the login node. These partition names and
-resource flags are examples from the measurement cluster:
-
-```bash
-srun -p devel -N1 -n1 -c8 -t 00:20:00 \
-  env GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
-srun -p devel -N1 -n1 -c2 -t 00:10:00 \
-  python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
-srun -p mi3501x --gres=gpu:1 -N1 -n1 -c2 -t 00:30:00 \
-  bash scripts/reproduce/run_throughput.sh \
-  inputs/qwen38-expert0/weights.bin out/throughput
-```
-
-Partition names and GPU resource flags are cluster-specific. Use your site's
-approved equivalents. The reproduction scripts do not submit Slurm jobs
-themselves. Source and tool paths are discovered at runtime; there is no
-dependency on the author's home/work directory. `BUILD_ROOT`, `BIN_DIR` and
-`LLVM_BIN` can override build output, benchmark binaries and analysis tools.
-If overriding `BUILD_ROOT`, set `BIN_DIR` to its `bin` subdirectory when running.
+Source and tool paths are discovered at runtime. `BUILD_ROOT`, `BIN_DIR` and
+`LLVM_BIN` override build output, benchmark binaries and analysis tools. If
+overriding `BUILD_ROOT`, set `BIN_DIR` to its `bin` subdirectory when running.
 
 Input and output directories must not already exist. On subsequent runs, reuse
 the input and binaries and choose a fresh result directory, e.g. `out/throughput-2`.
@@ -135,7 +125,7 @@ Generated inputs, build files, logs and results are ignored by Git.
 
 #### Step 6: Inspect and validate the results
 
-Read the summary on the login node or your workstation:
+Read the summary on the login node after the GPU job exits:
 
 ```bash
 python3 -m json.tool out/throughput/summary.json
@@ -215,8 +205,8 @@ GEMM or demonstrate an end-to-end fused-kernel speedup.
 
 The following sections describe the original hipANS project and its historical
 MI100/MI210 measurements. They are separate from the MI350X LDS-output
-experiment in Part I. Clone URLs point to this fork and build examples omit
-sudo; the project description below retains the original authorship and context.
+experiment in Part I. Build instructions link to the Slurm workflow above;
+the project description below retains the original authorship and context.
 The historical 4 KiB segment description is not the default of this fork:
 `HIPANS_BLOCK_SIZE` defaults to 8 KiB and is configurable as described above.
 
@@ -233,27 +223,9 @@ Both APIs are available in both C++ (raw device pointers) and Python/PyTorch (Py
 
 ### Building
 
-Clone this repo using
-
-```shell
-git clone --recursive https://github.com/Joezia/hipANS.git
-```
-
-Do the standard CMake thing:
-
-```shell
-cd hipANS; mkdir build; cd build;
-cmake .. -G Ninja
-cmake --build . --target all
-```
-
-If you get complaints about `/hipANS/third_party/glog... does not contain a CMakeLists.txt file.` then you didn't pull the submodules; run
-
-```shell
-git submodule sync
-git submodule update --init --recursive --jobs 0
-```
-and try again.
+Use the Slurm build and measurement tutorial in Part I. The reproduction build
+selects only the ANS libraries and benchmark; the historical full-library
+PyTorch/float build is outside this tutorial.
 
 ### Library rationale
 

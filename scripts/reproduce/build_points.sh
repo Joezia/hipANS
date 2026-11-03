@@ -6,8 +6,13 @@
 #   barrier0_b8192        removed        8 KiB    -> O1, O1+O2 (O2 is the run-time flag --input lds)
 #   barrier0_b4096/2048/1024  removed    4/2/1 KiB -> O1+O2+O3
 #
-# Usage: scripts/reproduce/build_points.sh   (env: GPU_ARCH=gfx950, JOBS=8, BUILD_ROOT=<repo>/build/reproduce)
+# Usage: srun -p <cpu-partition> -N1 -n1 -c8 -t 00:20:00 env GPU_ARCH=gfx950 bash scripts/reproduce/build_points.sh
+# Optional env: JOBS=8, BUILD_ROOT=<repo>/build/reproduce
 set -euo pipefail
+if [[ -z "${SLURM_JOB_ID:-}" || "$(hostname -s)" == login* || "$(hostname -s)" == hacchead* ]]; then
+  echo "ERROR: submit this build script with srun on a compute node." >&2
+  exit 2
+fi
 src="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 arch="${GPU_ARCH:-gfx950}"
 jobs="${JOBS:-8}"

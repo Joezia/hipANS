@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Measure decode throughput for the six points (run on an otherwise idle GPU).
 #
-#   scripts/reproduce/run_throughput.sh <weights.bin> <output-dir>
+#   srun -p <gpu-partition> --gres=gpu:1 -N1 -n1 -t 00:30:00 bash scripts/reproduce/run_throughput.sh <weights.bin> <output-dir>
 #
 # env: BIN_DIR (default <repo>/build/reproduce/bin, from build_points.sh)
 # Protocol: archive from the library encoder; one byte-exact verification run
@@ -10,6 +10,10 @@
 # R x archive size >= 768 MiB (so the compressed data cannot sit in the
 # Infinity Cache).
 set -euo pipefail
+if [[ -z "${SLURM_JOB_ID:-}" || "$(hostname -s)" == login* || "$(hostname -s)" == hacchead* ]]; then
+  echo "ERROR: submit this benchmark with srun on a GPU compute node." >&2
+  exit 2
+fi
 src="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 weights="${1:?usage: run_throughput.sh <weights.bin> <output-dir>}"
 out="${2:?usage: run_throughput.sh <weights.bin> <output-dir>}"

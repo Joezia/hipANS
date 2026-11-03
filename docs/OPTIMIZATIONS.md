@@ -38,26 +38,39 @@ library encoder (`--prepare`) and verify the decoded tile byte for byte against 
 
 ## Reproducing the MI350X results
 
-Requirements: ROCm with `hipcc`, CMake, Python 3 with `requests`, one idle MI350X (gfx950).
+Requirements: a Slurm cluster, ROCm with `hipcc`, CMake, Python 3 with `requests`,
+and one allocated MI350X (gfx950). Submit these commands from the login node in
+the repository directory, in order. Partition names and GPU request flags below
+are examples; use your cluster's equivalents. Compilation and downloading run
+on CPU compute nodes. The workload scripts reject execution outside Slurm or
+on a login node. See the README for the full clone-to-results tutorial.
 Profiling additionally needs `rocprof-compute` and `rocprofv3`.
 
 ```bash
 # 1. build the five binaries behind the six points (about 5-10 min)
-scripts/reproduce/build_points.sh
+srun -p devel -N1 -n1 -c8 -t 00:20:00 \
+  env GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
 
 # 2. download the 64 MiB test matrix (one expert of Qwen3.8-2.4T-A95B, layer 46); SHA-256 is checked
-python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
+srun -p devel -N1 -n1 -c2 -t 00:10:00 \
+  python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
 
 # 3. throughput of the six points: archives, byte-exact check, 3 processes per point
-scripts/reproduce/run_throughput.sh inputs/qwen38-expert0/weights.bin out/throughput
+srun -p mi3501x --gres=gpu:1 -N1 -n1 -c2 -t 00:30:00 \
+  bash scripts/reproduce/run_throughput.sh inputs/qwen38-expert0/weights.bin out/throughput
 
 # 4. profiler data and per-iteration cycle accounting
-scripts/reproduce/profile.sh inputs/qwen38-expert0/weights.bin out/throughput out/profile
-python3 scripts/reproduce/analyze_cycles.py --profile-dir out/profile \
+srun -p mi3501x --gres=gpu:1 -N1 -n1 -c2 -t 00:30:00 \
+  bash scripts/reproduce/profile.sh inputs/qwen38-expert0/weights.bin out/throughput out/profile
+srun -p devel -N1 -n1 -c2 -t 00:10:00 \
+  python3 scripts/reproduce/analyze_cycles.py --profile-dir out/profile \
   --bin-dir build/reproduce/bin --throughput-json out/throughput/summary.json --output out/cycles.json
 ```
 
 Step 3 prints your numbers next to the published ones (`scripts/reproduce/published_mi350x.json`).
+Step 4 is optional and can take substantially longer than throughput measurement.
+If profiling exceeds the site's permitted job duration, collect fewer points
+per job rather than keeping an idle GPU allocation.
 
 ## Notes on the profiler data
 

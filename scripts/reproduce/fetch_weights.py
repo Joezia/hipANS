@@ -9,7 +9,7 @@ The checkpoint stores all 512 experts of a layer as one 3-D tensor
 projection; which half is which does not matter for this benchmark).
 Only that slice is downloaded; the bytes are written unchanged.
 
-Usage: python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
+Usage: srun -p <cpu-partition> -N1 -n1 -t 00:10:00 python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
 Needs network access to huggingface.co and the `requests` package. For expert 0 the
 SHA-256 of the result is checked against the file used for the published numbers.
 """
@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import socket
 import struct
 import tempfile
 from pathlib import Path
@@ -71,6 +72,8 @@ def sha256_file(path: Path) -> str:
 
 
 def main() -> None:
+    if not os.environ.get("SLURM_JOB_ID") or socket.gethostname().split(".")[0].startswith(("login", "hacchead")):
+        raise SystemExit("Submit this download script with srun on a compute node.")
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--output", type=Path, required=True, help="new directory; must not exist")
     p.add_argument("--expert", type=int, default=0, help="expert index 0..511")
