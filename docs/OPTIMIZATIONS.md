@@ -59,6 +59,15 @@ python3 scripts/reproduce/analyze_cycles.py --profile-dir out/profile \
 
 Step 3 prints your numbers next to the published ones (`scripts/reproduce/published_mi350x.json`).
 
+## Notes on the profiler data
+
+* Cycles per iteration (from `SQ_WAVE_CYCLES`) and IPC were stable to within 0.5% across runs.
+* The core clock, average resident waves and VALU utilization divide by `GRBM_GUI_ACTIVE`.
+  rocprof-compute collects counters in several passes, and in one of three profiling runs this
+  counter was mis-recorded for the 1 KiB point in one of four profiling runs (resident waves 12,498 against a hardware limit of
+  8,192). `analyze_cycles.py` prints a warning when that happens; rerun `profile.sh`.
+* VALU utilization is `SQ_ACTIVE_INST_VALU / (GRBM_GUI_ACTIVE x CUs)` and is not capped at 100%.
+
 ## Published results (MI350X, gfx950)
 
 Test matrix: Qwen3.8-2.4T-A95B, layer 46, expert 0, `gate_up_proj`, bf16, 4,096 x 16,384 bytes
@@ -78,6 +87,7 @@ metric 7.2.3, summed over all waves) / 16,777,216.
 | O1 + O2 + O3 | 2 KiB | staged in LDS | 64.08 MB | 517.3 | 1,381.1 GB/s |
 | O1 + O2 + O3 | 1 KiB | staged in LDS | 70.58 MB | 628.0 | 1,480.2 GB/s |
 
-An independent second run of the whole pipeline on the same machine reproduced the throughput
-within 0.6% and the cycles per iteration within 0.4% of these values; the archives are
-byte-identical.
+Three further runs of the whole pipeline on the same machine (two of them from a fresh clone of
+this branch, including the data download) reproduced the throughput within 1.2% and the cycles
+per iteration within 0.4% of these values; the archives were byte-identical in every run. The
+largest throughput spread is at 1 KiB, where the three processes of one run differ by up to 3.3%.

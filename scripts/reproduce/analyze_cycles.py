@@ -28,6 +28,7 @@ LLVM = Path(os.environ.get("LLVM_BIN", "/opt/rocm/llvm/bin"))
 REPLICAS = 16
 RAW_BYTES = 67_108_864
 ITERATIONS = REPLICAS * RAW_BYTES // 64  # 16,777,216 for every block size
+MAX_RESIDENT_WAVES = 256 * 32  # MI350X: 256 CUs x 32 wave slots
 POINTS = [  # (dir name, point label, binary variant, block bytes, stage kernel)
     ("r0", "R0", "barrier1_b8192", 8192, False),
     ("o1", "O1", "barrier0_b8192", 8192, False),
@@ -80,6 +81,10 @@ def counter_cycles(m: dict[str, tuple[str, float]]) -> dict:
         "instructions_per_iteration": g("7.2.2") * g("7.1.2") / ITERATIONS,
         "components_sum_over_wave_cycles": (g("7.2.4") + g("7.2.5") + g("7.2.6")) / wc,
     }
+    # GRBM_GUI_ACTIVE (denominator of the clock, occupancy and VALU metrics) is occasionally mis-recorded in
+    # one of rocprof-compute's counter passes; more resident waves than the hardware has slots shows it.
+    # Cycles per iteration and IPC do not use it.
+    out["grbm_pass_suspect"] = out["avg_resident_waves"] > MAX_RESIDENT_WAVES
     return out
 
 
@@ -215,6 +220,9 @@ def main() -> None:
         entry["step_cycles_per_iteration"] = {k: pc["share_percent"][k] / 100.0 * tot for k in STEP_ORDER}
         entry["measured_throughput_GBps"] = thr[label]["median_GBps"]
         result["points"][name] = entry
+        if c["grbm_pass_suspect"]:
+            print(f"WARNING {name}: {c['avg_resident_waves']:.0f} average resident waves exceeds the hardware limit "
+                  f"{MAX_RESIDENT_WAVES}; core clock, occupancy and VALU utilization of this point are invalid - rerun profile.sh")
     a.output.write_text(json.dumps(result, indent=1) + "\n")
     for name, e in result["points"].items():
         print(name, json.dumps({"cycles/iter": round(e["counters"]["cycles_per_iteration"]["total"], 1),
