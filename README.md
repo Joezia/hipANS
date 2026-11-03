@@ -1,17 +1,13 @@
 # hipANS: Portable Lossless Compression of Numerical Data for GPU Architectures
 
-Developer: Jinwu Yang, Yida Gu, Dingwen Tao @ Institute of Computing Technology, Chinese Academy of Sciences
+This README has two distinct parts:
 
-hipANS is a GPU library implemented in the HIP programming language for fast, specialized lossless data compression, designed for ML and HPC applications. It also includes the **first** publicly available generalized [asymmetric numeral system (ANS)](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) compressor and decompressor, compatible with various GPU architectures, including AMD GPUs. It is a GPU analogue to Yann Collet's [FSE (Finite State Entropy)](https://github.com/Cyan4973/FiniteStateEntropy) ANS library. It has been primarily ported and optimized from Facebook's [dietGPU](https://github.com/facebookresearch/dietgpu) library.
+- [Part I: MI350X optimizations and reproduction tutorial](#part-i-mi350x-optimizations-and-reproduction-tutorial): additions in this fork.
+- [Part II: Original hipANS documentation](#part-ii-original-hipans-documentation): original project description, historical performance figures and API rationale.
 
-It currently consists of two parts:
+---
 
-- **ANS entropy codec**: a generalized byte-oriented range-based ANS (rANS) entropy encoder and decoder, that operates at throughputs around 50-150 GB/s for reasonable data sizes on an MI100/MI210 GPU.
-- **Floating point codec**: an extension to the above to handle fast lossless compression and decompression of unstructured floating point data, for use in ML and HPC applications, especially in communicating over local interconnects (PCIe / NVLink) and remote interconnects (Ethernet / InfiniBand). This operates at around 50-300 GB/s for reasonable data sizes on an MI100/MI210 GPU.
-
-Both APIs are available in both C++ (raw device pointers) and Python/PyTorch (PyTorch tensor) API forms.
-
-## Decode optimizations for AMD Instinct MI350X
+## Part I: MI350X optimizations and reproduction tutorial
 
 This fork includes three switchable optimizations and a standalone reproduction workflow:
 
@@ -38,27 +34,83 @@ Python 3.9+ and `requests`. Throughput measurement does not require a profiler.
 Optional cycle analysis requires `rocprof-compute`, `rocprofv3` with host-trap
 PC sampling, and ROCm LLVM tools. Other GPUs/toolchains can give different results.
 
-### Reproduce all six points
+### Tutorial: from clone to results
+
+Follow steps 1-6 below on a Linux workstation or server where you are allowed
+to compile and run GPU workloads. For a Slurm cluster, use the alternative
+job commands in the following subsection for steps 3-5; do not run those
+steps directly on its login node.
+
+#### Step 1: Clone this fork
 
 ```bash
-git clone --recursive https://github.com/Joezia/hipANS.git
+git clone --recursive --branch main https://github.com/Joezia/hipANS.git
 cd hipANS
+git rev-parse HEAD
+```
 
-# 1. Compile five binaries covering all six points.
+Keep all subsequent commands in this repository directory. Save the commit
+printed above with your results so that the experiment can be reproduced.
+
+#### Step 2: Prepare the environment
+
+Load your site's ROCm environment supporting MI350X. Check the compiler and
+build tools in the environment that will perform the build:
+
+```bash
+hipcc --version
+cmake --version
+python3 --version
+python3 -c 'import requests; print(requests.__version__)'
+```
+
+If `requests` is missing, install it in your Python environment (for example,
+`python3 -m pip install requests`). On a cluster, follow local environment and
+package-installation policies. This benchmark does not require PyTorch or sudo.
+
+#### Step 3: Build all variants
+
+```bash
 GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
+```
 
-# 2. Download a fixed 64 MiB BF16 weight slice; verifies SHA-256.
+Wait for five `built ...` messages. Binaries are placed in
+`build/reproduce/bin/`; configure and build logs are in `build/reproduce/`.
+
+#### Step 4: Download the test input
+
+```bash
 python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
+sha256sum inputs/qwen38-expert0/weights.bin
+```
 
-# 3. Create archives, verify every point byte for byte, then measure all points.
+The script downloads only a fixed 64 MiB BF16 expert slice, not the whole
+model, and validates its SHA-256. Expected hash:
+
+```text
+f51d72cada2a1771261882f2f4dc56667c6059547ad385de57220657c72b6587
+```
+
+#### Step 5: Run all six configurations
+
+Use one otherwise idle MI350X. `rocminfo` on the GPU compute node should
+identify the device and `gfx950`. On a standalone server with several GPUs,
+select your assigned device using the site's ROCm visibility settings.
+
+```bash
 bash scripts/reproduce/run_throughput.sh \
   inputs/qwen38-expert0/weights.bin out/throughput
 ```
 
-Run these commands in order, proceeding only if each succeeds. Steps 1 and 2
-need no GPU; step 3 needs an allocated, otherwise idle GPU. On a shared Slurm
-cluster, submit them as non-interactive jobs from the login node. For example,
-on the cluster used for these measurements:
+This creates native archives for the four block sizes, verifies each of the
+six points byte for byte, runs three measurement processes per point and
+prints the comparison table. Proceed to the next step only if it exits successfully.
+
+#### Slurm alternative for steps 3-5
+
+After cloning and preparing the environment, submit these commands in order
+from the repository directory on the login node. These partition names and
+resource flags are examples from the measurement cluster:
 
 ```bash
 srun -p devel -N1 -n1 -c8 -t 00:20:00 \
@@ -81,7 +133,36 @@ Input and output directories must not already exist. On subsequent runs, reuse
 the input and binaries and choose a fresh result directory, e.g. `out/throughput-2`.
 Generated inputs, build files, logs and results are ignored by Git.
 
-### Check the results
+#### Step 6: Inspect and validate the results
+
+Read the summary on the login node or your workstation:
+
+```bash
+python3 -m json.tool out/throughput/summary.json
+```
+
+The following check verifies that all six correctness runs passed and all
+four archive hashes match the reference:
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+out = Path('out/throughput')
+for i in range(6):
+    result = json.loads((out / 'correctness' / f'point-{i}.json').read_text())
+    assert result['verified_actual_LDS'], f'Correctness failed at point {i}'
+summary = json.loads((out / 'summary.json').read_text())
+assert len(summary['points']) == 6
+hashes = summary['archive_identical_to_published']
+assert len(hashes) == 4 and all(hashes.values()), 'Archive hash mismatch'
+for point in summary['points']:
+    print(point['point'], point['median_GBps'], 'GB/s',
+          'processes:', point['process_GBps'])
+print('PASS: six correctness checks and four archive hashes')
+PY
+```
 
 The script prints three process throughputs per point, their median, and the
 percentage difference from the reference in
@@ -128,7 +209,29 @@ an intermediate decompressed tensor written to HBM and read back by the next
 kernel. This benchmark measures that decode stage only; it does not execute
 GEMM or demonstrate an end-to-end fused-kernel speedup.
 
-## Building
+---
+
+## Part II: Original hipANS documentation
+
+The following sections describe the original hipANS project and its historical
+MI100/MI210 measurements. They are separate from the MI350X LDS-output
+experiment in Part I. Clone URLs point to this fork and build examples omit
+sudo; the project description below retains the original authorship and context.
+The historical 4 KiB segment description is not the default of this fork:
+`HIPANS_BLOCK_SIZE` defaults to 8 KiB and is configurable as described above.
+
+Developer: Jinwu Yang, Yida Gu, Dingwen Tao @ Institute of Computing Technology, Chinese Academy of Sciences
+
+hipANS is a GPU library implemented in the HIP programming language for fast, specialized lossless data compression, designed for ML and HPC applications. It also includes the **first** publicly available generalized [asymmetric numeral system (ANS)](https://en.wikipedia.org/wiki/Asymmetric_numeral_systems) compressor and decompressor, compatible with various GPU architectures, including AMD GPUs. It is a GPU analogue to Yann Collet's [FSE (Finite State Entropy)](https://github.com/Cyan4973/FiniteStateEntropy) ANS library. It has been primarily ported and optimized from Facebook's [dietGPU](https://github.com/facebookresearch/dietgpu) library.
+
+It currently consists of two parts:
+
+- **ANS entropy codec**: a generalized byte-oriented range-based ANS (rANS) entropy encoder and decoder, that operates at throughputs around 50-150 GB/s for reasonable data sizes on an MI100/MI210 GPU.
+- **Floating point codec**: an extension to the above to handle fast lossless compression and decompression of unstructured floating point data, for use in ML and HPC applications, especially in communicating over local interconnects (PCIe / NVLink) and remote interconnects (Ethernet / InfiniBand). This operates at around 50-300 GB/s for reasonable data sizes on an MI100/MI210 GPU.
+
+Both APIs are available in both C++ (raw device pointers) and Python/PyTorch (PyTorch tensor) API forms.
+
+### Building
 
 Clone this repo using
 
@@ -152,7 +255,7 @@ git submodule update --init --recursive --jobs 0
 ```
 and try again.
 
-## Library rationale
+### Library rationale
 
 As on-device global memory / HBM bandwidth continues to improve at a faster rate than CPU/GPU interconnect or server-to-server networking bandwidth, spending GPU compute and gmem bandwidth to save on data sent over interconnects is becoming more advantageous. HipANS aims to target this gap.
 
@@ -160,15 +263,15 @@ One can imagine a Pareto-optimal tradeoff curve between realizable compression r
 
 The initial focus of this library will be in HPC/ML distributed collective communications libraries, for primitives such as all-to-all, all-gather, reduce-scatter and all-reduce. Right now no off the shelf integration is provided (in progress), but the basics of the C++ API are available for use, as are Python-level PyTorch tensor-based APIs.
 
-## ANS codec
+### ANS codec
 
 The rANS codec operates on 8 bit bytes. It can compress arbitrary data, but using statistics gathered on a bytewise basis, so data highly structured or redundant at a level above byte level will typically not compress well. This codec however is meant to be applicable for any number of lossless compression applications, including usage as an entropy coder for LZ or RLE type matches for a fully-formed compression system. Symbol probability precisions supported are 9, 10 and 11 bits (i.e., symbol occurances are quantized to the nearest 1/512, 1/1024 or 1/2048).
 
-## Float codec
+### Float codec
 
 The floating point compressor at the moment uses the rANS codec to handle compression of floating point exponents, as typically in ML/HPC data a very limited exponent dynamic range is used and is highly compressible. Floating point sign and significand values tend to be less compressible / fairly high entropy in practice, though sparse data or presence of functions like ReLU in neural networks can result in a lot of outright zero values which are very compressible. A future extension to the library will allow for specialized compression of sparse or semi-sparse data, specializing compression of zeros. At the moment only float16 (IEEE 754 binary16) and bfloat16 (fields of the most significant 16 bits of a IEEE 754 binary32 word) are supported, with float32 (IEEE 754 binary32) support coming shortly.
 
-## API design
+### API design
 
 The design fundamentals, originally established for the CUDA-based DietGPU library targeting CC 3.5+ (Kepler class) GPUs or later, have been effectively adapted for compatibility with the ROCm platform, specifically focusing on MI100/MI210 GPUs. This strategic porting, now named hipANS, ensures that the library leverages the advanced capabilities of AMD GPUs while retaining the efficiency and performance optimized for V100/A100 GPUs.
 
@@ -184,7 +287,7 @@ However, during the compression process, only the GPU is aware of the actual fin
 
 This transition of the DietGPU library from the CUDA platform to the ROCm platform, resulting in hipANS, marks a significant advancement in providing a versatile and high-performance compression solution for a broader range of HPC applications.
 
-## References
+### References
 
 Prior GPU-based ANS implementations [to my knowledge](https://encode.su/threads/2078-List-of-Asymmetric-Numeral-Systems-implementations) include:
 
@@ -205,6 +308,6 @@ These works are sometimes oriented at compressing HPC-type data (e.g., 2d/3d/Nd 
 - [nvCOMP](https://github.com/NVIDIA/nvcomp), Nvidia's GPU lossless compression library.
 - [dietGPU](https://github.com/facebookresearch/dietgpu), DietGPU: GPU-based lossless compression for numerical data.
 
-## License
+### License
 
 hipANS is licensed with the MIT license, available in the LICENSE file at the top level.
