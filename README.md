@@ -13,24 +13,135 @@ Both APIs are available in both C++ (raw device pointers) and Python/PyTorch (Py
 
 ## Decode optimizations for AMD Instinct MI350X
 
-This branch adds three switchable optimizations to the ANS decoder (barrier removal, staging the
-compressed block in LDS, smaller blocks) and a benchmark with scripts that reproduce the measured
-MI350X results from this repository alone. See [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md).
+This fork includes three switchable optimizations and a standalone reproduction workflow:
+
+| Point | Per-symbol workgroup barrier | Compressed input | Decode block |
+|---|---|---|---|
+| R0 | Kept | Global memory | 8 KiB |
+| O1 | Removed | Global memory | 8 KiB |
+| O1 + O2 | Removed | Staged in LDS | 8 KiB |
+| O1 + O2 + O3 | Removed | Staged in LDS | 4 / 2 / 1 KiB |
+
+O1 uses `HIPANS_DECODE_WARP_BARRIER=0`, O3 uses `HIPANS_BLOCK_SIZE`, and O2
+uses the benchmark's `--input lds` option. Defaults retain the original barrier
+and 8 KiB block size. O2 is implemented in the benchmark, not enabled by the
+standard `ansDecodeBatchPointer` API. Only this repository is needed; input
+weights are downloaded separately by the supplied script.
+
+### Environment
+
+The reference results use **one AMD Instinct MI350X, gfx950, wave64, 256 CUs**
+on Linux. The latest local reproduction used CMake 3.28.3 and ROCm's Clang
+23.0.0, as recorded by its CMake compiler configuration. Load a ROCm toolchain
+supporting gfx950, with `hipcc` and `cmake` on `PATH`; data download requires
+Python 3.9+ and `requests`. Throughput measurement does not require a profiler.
+Optional cycle analysis requires `rocprof-compute`, `rocprofv3` with host-trap
+PC sampling, and ROCm LLVM tools. Other GPUs/toolchains can give different results.
+
+### Reproduce all six points
+
+```bash
+git clone --recursive https://github.com/Joezia/hipANS.git
+cd hipANS
+
+# 1. Compile five binaries covering all six points.
+GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
+
+# 2. Download a fixed 64 MiB BF16 weight slice; verifies SHA-256.
+python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
+
+# 3. Create archives, verify every point byte for byte, then measure all points.
+bash scripts/reproduce/run_throughput.sh \
+  inputs/qwen38-expert0/weights.bin out/throughput
+```
+
+Run these commands in order, proceeding only if each succeeds. Steps 1 and 2
+need no GPU; step 3 needs an allocated, otherwise idle GPU. On a shared Slurm
+cluster, submit them as non-interactive jobs from the login node. For example,
+on the cluster used for these measurements:
+
+```bash
+srun -p devel -N1 -n1 -c8 -t 00:20:00 \
+  env GPU_ARCH=gfx950 JOBS=8 bash scripts/reproduce/build_points.sh
+srun -p devel -N1 -n1 -c2 -t 00:10:00 \
+  python3 scripts/reproduce/fetch_weights.py --output inputs/qwen38-expert0
+srun -p mi3501x --gres=gpu:1 -N1 -n1 -c2 -t 00:30:00 \
+  bash scripts/reproduce/run_throughput.sh \
+  inputs/qwen38-expert0/weights.bin out/throughput
+```
+
+Partition names and GPU resource flags are cluster-specific. Use your site's
+approved equivalents. The reproduction scripts do not submit Slurm jobs
+themselves. Source and tool paths are discovered at runtime; there is no
+dependency on the author's home/work directory. `BUILD_ROOT`, `BIN_DIR` and
+`LLVM_BIN` can override build output, benchmark binaries and analysis tools.
+If overriding `BUILD_ROOT`, set `BIN_DIR` to its `bin` subdirectory when running.
+
+Input and output directories must not already exist. On subsequent runs, reuse
+the input and binaries and choose a fresh result directory, e.g. `out/throughput-2`.
+Generated inputs, build files, logs and results are ignored by Git.
+
+### Check the results
+
+The script prints three process throughputs per point, their median, and the
+percentage difference from the reference in
+[`published_mi350x.json`](scripts/reproduce/published_mi350x.json).
+Each process uses 10 warm-up launches and the median of 50 timed launches;
+the reported point is the median of the three process throughputs.
+
+- `out/throughput/summary.json`: six results and archive SHA comparisons.
+- `out/throughput/correctness/point-0.json` through `point-5.json`: all must
+  report `verified_actual_LDS: true`. A mismatch exits the workflow with an error.
+- `out/throughput/timing/point-*-run-*.json`: per-process times, throughput,
+  GPU architecture, build commit and resource usage. These separate timing
+  processes use `--skip-verify`; correctness is checked by the preceding runs.
+- `archive_identical_to_published` in the summary: all four values should be
+  `true` for the fixed input and reference archive format.
+
+Reference throughput is 476.7, 500.6, 692.4, 1094.0, 1381.1 and 1480.2 GB/s
+for R0 through the 1 KiB point. One local reproduction (job 125781) differed
+by -0.30% to +0.49%; hardware, clocks, contention and compiler changes affect
+the numbers. Consult [the optimization notes](docs/OPTIMIZATIONS.md) for full
+configuration, reference results and optional profiling commands.
+
+### What this throughput measures
+
+`effective_LDS_GBps` is **uncompressed bytes decoded into LDS / median GPU
+kernel seconds / 1e9**. The fixed matrix is replicated at independent GPU
+addresses (16 replicas for the reference workload). All six points, including
+R0, use the same LDS-output benchmark. Input staging for O2 and workgroup LUT
+loading are inside the timed kernel. Global decode-table construction,
+compression, transfers, correctness checks and profiling are outside timing.
+
+The original README's 50-150 GB/s ANS and 50-300 GB/s float-codec figures refer
+to the original MI100/MI210 codec workloads. This new experiment uses MI350X,
+a fixed bytewise BF16 input, and **LDS output rather than decoded output written
+back to global memory**. It is a kernel measurement, not full
+`ansDecodeBatchPointer` API latency or measured HBM bandwidth. The historical
+figures do not establish an equivalent timing protocol, so a direct speedup
+against them would be misleading. Compare R0 and the optimization points
+within this new benchmark instead.
+
+The reason for decoding into LDS is **future kernel fusion**: a consumer such
+as GEMM could use decoded tiles immediately in the same workgroup, avoiding
+an intermediate decompressed tensor written to HBM and read back by the next
+kernel. This benchmark measures that decode stage only; it does not execute
+GEMM or demonstrate an end-to-end fused-kernel speedup.
 
 ## Building
 
 Clone this repo using
 
 ```shell
-git clone https://github.com/hipdac-lab/hipANS
+git clone --recursive https://github.com/Joezia/hipANS.git
 ```
 
 Do the standard CMake thing:
 
 ```shell
 cd hipANS; mkdir build; cd build;
-sudo cmake .. -G Ninja
-sudo cmake --build . --target all
+cmake .. -G Ninja
+cmake --build . --target all
 ```
 
 If you get complaints about `/hipANS/third_party/glog... does not contain a CMakeLists.txt file.` then you didn't pull the submodules; run

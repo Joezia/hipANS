@@ -63,8 +63,8 @@ Step 3 prints your numbers next to the published ones (`scripts/reproduce/publis
 
 * Cycles per iteration (from `SQ_WAVE_CYCLES`) and IPC were stable to within 0.5% across runs.
 * The core clock, average resident waves and VALU utilization divide by `GRBM_GUI_ACTIVE`.
-  rocprof-compute collects counters in several passes, and in one of three profiling runs this
-  counter was mis-recorded for the 1 KiB point in one of four profiling runs (resident waves 12,498 against a hardware limit of
+  rocprof-compute collects counters in several passes; in one of four profiling runs this
+  counter was mis-recorded for the 1 KiB point (resident waves 12,498 against a hardware limit of
   8,192). `analyze_cycles.py` prints a warning when that happens; rerun `profile.sh`.
 * VALU utilization is `SQ_ACTIVE_INST_VALU / (GRBM_GUI_ACTIVE x CUs)` and is not capped at 100%.
 

@@ -20,11 +20,30 @@ import collections
 import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-LLVM = Path(os.environ.get("LLVM_BIN", "/opt/rocm/llvm/bin"))
+def llvm_tool(name: str) -> str:
+    """Find ROCm tools without depending on a machine-specific installation path."""
+    if os.environ.get("LLVM_BIN"):
+        candidate = Path(os.environ["LLVM_BIN"]) / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+        raise RuntimeError(f"{name} not executable in LLVM_BIN")
+    hipcc = shutil.which("hipcc")
+    if hipcc:
+        root = Path(hipcc).resolve().parent.parent
+        for directory in (root / "lib" / "llvm" / "bin", root / "llvm" / "bin"):
+            candidate = directory / name
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    found = shutil.which(name)
+    if found:
+        return found
+    raise RuntimeError(f"{name} not found; load ROCm or set LLVM_BIN")
+
 REPLICAS = 16
 RAW_BYTES = 67_108_864
 ITERATIONS = REPLICAS * RAW_BYTES // 64  # 16,777,216 for every block size
@@ -90,15 +109,15 @@ def counter_cycles(m: dict[str, tuple[str, float]]) -> dict:
 
 def code_object_bytes(binary: Path, tmp: Path) -> Path:
     fat, co = tmp / "fat.bin", tmp / "gfx950.co"
-    subprocess.run([LLVM / "llvm-objcopy", f"--dump-section=.hip_fatbin={fat}", str(binary), "/dev/null"], check=True)
-    subprocess.run([LLVM / "clang-offload-bundler", "--unbundle", "--type=o",
+    subprocess.run([llvm_tool("llvm-objcopy"), f"--dump-section=.hip_fatbin={fat}", str(binary), os.devnull], check=True)
+    subprocess.run([llvm_tool("clang-offload-bundler"), "--unbundle", "--type=o",
                     "--targets=hipv4-amdgcn-amd-amdhsa--gfx950", f"--input={fat}", f"--output={co}"], check=True)
     return co
 
 
 def disassemble_kernel(co: Path, stage: bool):
     """Return ({addr: text}, {label: addr}) of hipansLDS<128,false,false,stage>."""
-    txt = subprocess.run([LLVM / "llvm-objdump", "-d", "--no-show-raw-insn", "--symbolize-operands",
+    txt = subprocess.run([llvm_tool("llvm-objdump"), "-d", "--no-show-raw-insn", "--symbolize-operands",
                           "--mcpu=gfx950", str(co)], check=True, capture_output=True, text=True).stdout.splitlines()
     sym = f"<_Z9hipansLDSILi128ELb0ELb0ELb{1 if stage else 0}EEvPKhmPKjS1_Phjjmmj>:"
     start = next(i for i, l in enumerate(txt) if l.endswith(sym) and re.match(r"^[0-9a-f]{16} ", l))
