@@ -5,6 +5,7 @@
 #include <vector>
 #include <iostream>
 #include "hipans/ans/GpuANSCodec.h"
+#include "hipans/ans/GpuANSUtils.h"
 #include "hipans/utils/StackDeviceMemory.h"
 
 using namespace hipans;
