@@ -32,6 +32,12 @@ static_assert(kNumSymbols > 1, "");
 #endif
 constexpr uint32_t kDefaultBlockSize = HIPANS_BLOCK_SIZE;
 
+// 1 keeps the original workgroup barrier inside decodeOneWarp (upstream
+// behaviour); 0 removes it (optimization O1).
+#ifndef HIPANS_DECODE_WARP_BARRIER
+#define HIPANS_DECODE_WARP_BARRIER 1
+#endif
+
 // limit state to 2^31 - 1, so as to prevent addition overflow in the integer
 // division via mul and shift by constants
 constexpr int kANSStateBits = sizeof(ANSStateT) * 8 - 1;

@@ -86,10 +86,13 @@ __device__ void decodeOneWarp(
 
   // We only sometimes read a new encoded value
   bool read = state < kANSMinState;
-  // O1 safety: each wave decodes a different block and only shares the
-  // read-only lookup table, whose initialization barrier is in the caller.
-  // ballot/popcount operate within this wave, so no workgroup rendezvous is
-  // needed between the state update and the ballot.
+#if HIPANS_DECODE_WARP_BARRIER
+  __syncthreads();
+#endif
+  // O1 safety (HIPANS_DECODE_WARP_BARRIER=0): each wave decodes a different
+  // block and only shares the read-only lookup table, whose initialization
+  // barrier is in the caller. ballot/popcount operate within this wave, so no
+  // workgroup rendezvous is needed between the state update and the ballot.
   uint64_t vote = __ballot(read);
 
   // We are reading in the same order as we wrote, except by decrementing from
