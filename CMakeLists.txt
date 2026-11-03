@@ -27,11 +27,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(HIPANS_LIBRARY_TYPE "SHARED" CACHE STRING "Build hipANS component libraries as SHARED or STATIC")
 set_property(CACHE HIPANS_LIBRARY_TYPE PROPERTY STRINGS SHARED STATIC)
 
+# Decode optimizations (see docs/OPTIMIZATIONS.md). Defaults keep upstream behaviour.
+set(HIPANS_BLOCK_SIZE 8192 CACHE STRING "ANS block size in bytes: 8192, 4096, 2048 or 1024 (O3)")
+set(HIPANS_DECODE_WARP_BARRIER 1 CACHE STRING "1 keeps the barrier in decodeOneWarp, 0 removes it (O1)")
+set(HIPANS_OPT_DEFINITIONS "-DHIPANS_BLOCK_SIZE=${HIPANS_BLOCK_SIZE} -DHIPANS_DECODE_WARP_BARRIER=${HIPANS_DECODE_WARP_BARRIER}")
+string(APPEND CMAKE_CXX_FLAGS " ${HIPANS_OPT_DEFINITIONS}")
+string(APPEND CMAKE_HIP_FLAGS " ${HIPANS_OPT_DEFINITIONS}")
+
 add_subdirectory(third_party/glog)
 add_subdirectory(third_party/googletest)
 
 add_subdirectory(hipans/utils)
 add_subdirectory(hipans/ans)
+
+option(HIPANS_BUILD_BENCH "Build the ANS-to-LDS decode benchmark" ON)
+if(HIPANS_BUILD_BENCH)
+    add_subdirectory(hipans/bench)
+endif()
 
 option(HIPANS_BUILD_FULL_LIBRARY "Build float codec, PyTorch API, and benchmarks" ON)
 if(HIPANS_BUILD_FULL_LIBRARY)
