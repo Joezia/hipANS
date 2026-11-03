@@ -1,0 +1,93 @@
+{
+  "schema": "hipans-published-v1",
+  "gpu": "AMD Instinct MI350X (gfx950)",
+  "matrix": "Qwen3.8-2.4T-A95B layer 46, expert 0, gate_up_proj (bf16, 4096 x 16384 bytes, 64 MiB)",
+  "weights_sha256": "f51d72cada2a1771261882f2f4dc56667c6059547ad385de57220657c72b6587",
+  "protocol": "16 replicas, 128 threads/workgroup, grid x4, 1 stream, 10 warm-up + 50 timed launches per process, median of 50, median of 3 processes",
+  "archive_sha256_by_block_size": {
+    "8192": "26d1ff782d66e2bc56e62adfed68f8e602b0d03bc600da84b8069dcec46d31a6",
+    "4096": "5a0575dc3fb791599579b4d28da15765c7f4fdfebdae9b6442642786dae2769b",
+    "2048": "dfb300f711d6a6d59e839f60505be8e5a3ad99e49cf30641726a8652d489ecb4",
+    "1024": "8280842ea31c85134a69851e340366f02a27ed1d15e3d4a432e194ade404bea7"
+  },
+  "points": [
+    {
+      "point": "R0",
+      "block_size_bytes": 8192,
+      "input": "global",
+      "archive_bytes": 58967408,
+      "replicas": 16,
+      "process_GBps": [
+        476.9,
+        476.4,
+        476.7
+      ],
+      "median_GBps": 476.7
+    },
+    {
+      "point": "O1",
+      "block_size_bytes": 8192,
+      "input": "global",
+      "archive_bytes": 58967408,
+      "replicas": 16,
+      "process_GBps": [
+        501.0,
+        500.6,
+        500.1
+      ],
+      "median_GBps": 500.6
+    },
+    {
+      "point": "O1+O2",
+      "block_size_bytes": 8192,
+      "input": "lds",
+      "archive_bytes": 58967408,
+      "replicas": 16,
+      "process_GBps": [
+        692.4,
+        692.7,
+        692.2
+      ],
+      "median_GBps": 692.4
+    },
+    {
+      "point": "O1+O2+O3 @ 4 KiB",
+      "block_size_bytes": 4096,
+      "input": "lds",
+      "archive_bytes": 60664528,
+      "replicas": 16,
+      "process_GBps": [
+        1088.3,
+        1094.5,
+        1094.0
+      ],
+      "median_GBps": 1094.0
+    },
+    {
+      "point": "O1+O2+O3 @ 2 KiB",
+      "block_size_bytes": 2048,
+      "input": "lds",
+      "archive_bytes": 64079424,
+      "replicas": 16,
+      "process_GBps": [
+        1381.1,
+        1373.5,
+        1385.6
+      ],
+      "median_GBps": 1381.1
+    },
+    {
+      "point": "O1+O2+O3 @ 1 KiB",
+      "block_size_bytes": 1024,
+      "input": "lds",
+      "archive_bytes": 70576992,
+      "replicas": 16,
+      "process_GBps": [
+        1460.7,
+        1480.2,
+        1487.3
+      ],
+      "median_GBps": 1480.2
+    }
+  ]
+}

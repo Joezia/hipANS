@@ -11,6 +11,12 @@ It currently consists of two parts:
 
 Both APIs are available in both C++ (raw device pointers) and Python/PyTorch (PyTorch tensor) API forms.
 
+## Decode optimizations for AMD Instinct MI350X
+
+This branch adds three switchable optimizations to the ANS decoder (barrier removal, staging the
+compressed block in LDS, smaller blocks) and a benchmark with scripts that reproduce the measured
+MI350X results from this repository alone. See [docs/OPTIMIZATIONS.md](docs/OPTIMIZATIONS.md).
+
 ## Building
 
 Clone this repo using
